@@ -27,7 +27,7 @@ Bluefox2Ros::Bluefox2Ros(const ros::NodeHandle& nh, const std::string& prefix)
 bool Bluefox2Ros::Grab(const sensor_msgs::ImagePtr& image_msg,
                        const sensor_msgs::CameraInfoPtr& cinfo_msg) {
   // Add expose time to current time stamp
-  return bluefox2_.GrabImage(*image_msg);
+  return bluefox2_.GrabImageUV(*image_msg);
 }
 
 }  // namespace bluefox2

@@ -24,12 +24,13 @@ class Bluefox2 {
   void RequestSingle() const;
   void Configure(Bluefox2DynConfig &config);
   bool GrabImage(sensor_msgs::Image &image_msg);
+  bool GrabImageUV(sensor_msgs::Image &image_msg);
 
   void SetMM(int mm) const;
   void SetMaster() const;
   void SetSlave() const;
 
- private:
+// private:
   std::string AvailableDevice() const;
 
   bool IsCtmOnDemandSupported() const;
@@ -56,6 +57,9 @@ class Bluefox2 {
 
   int timeout_ms_{200};
   std::string serial_;
+  int lastExpose;
+  int picNumber;
+  bool auvControl;
   Bluefox2DynConfig config_;
   mvIMPACT::acquire::Request *request_{nullptr};
   mvIMPACT::acquire::DeviceManager dev_mgr_;

@@ -9,6 +9,8 @@ Bluefox2::Bluefox2(const std::string &serial) : serial_(serial) {
   if (!(dev_ = dev_mgr_.getDeviceBySerial(serial))) {
     throw std::runtime_error(serial + " not found. " + AvailableDevice());
   }
+  lastExpose = 1000;
+  picNumber = 0;
   OpenDevice();
 }
 
@@ -68,6 +70,80 @@ void Bluefox2::RequestImages(int n) const {
     int requestNr = fi_->imageRequestWaitFor(timeout_ms_);
     fi_->imageRequestUnlock(requestNr);
   }
+}
+
+bool Bluefox2::GrabImageUV(sensor_msgs::Image &image_msg) {
+  // NOTE: A request object is locked for the driver whenever the corresponding
+  // wait function returns a valid request object.
+  // All requests returned by
+  // mvIMPACT::acquire::FunctionInterface::imageRequestWaitFor need to be
+  // unlocked no matter which result mvIMPACT::acquire::Request::requestResult
+  // contains.
+  // http://www.matrix-vision.com/manuals/SDK_CPP/ImageAcquisition_section_capture.html
+  int request_nr = INVALID_ID;
+  request_nr = fi_->imageRequestWaitFor(timeout_ms_);
+
+  // Check if request is valid
+  if (!fi_->isRequestNrValid(request_nr)) {
+    // We do not need to unlock here because the request is not valid?
+    fi_->imageRequestUnlock(request_nr);
+    return false;
+  }
+
+  request_ = fi_->getRequest(request_nr);
+
+  // Check if request is ok
+  if (!request_->isOK()) {
+    // need to unlock here because the request is valid even if it is not ok
+    fi_->imageRequestUnlock(request_nr);
+    return false;
+  }
+
+  std::string encoding;
+  const auto bayer_mosaic_parity = request_->imageBayerMosaicParity.read();
+  if (bayer_mosaic_parity != bmpUndefined) {
+    // Bayer pattern
+    const auto bytes_per_pixel = request_->imageBytesPerPixel.read();
+    encoding = BayerPatternToEncoding(bayer_mosaic_parity, bytes_per_pixel);
+  } else {
+    encoding = PixelFormatToEncoding(request_->imagePixelFormat.read());
+  }
+  sensor_msgs::fillImage(image_msg, encoding, request_->imageHeight.read(),
+                         request_->imageWidth.read(),
+                         request_->imageLinePitch.read(),
+                         request_->imageData.read());
+  if (auvControl||true){
+	  int maxim = 0;
+	  int maxIndex = 0;
+	  int hist[256];
+	  int temp;
+	  int size = image_msg.width*image_msg.height;
+	  memset(hist,0,sizeof(int)*256);
+	  for (int i = 0;i<size;i++)
+	  {
+		  temp = image_msg.data[i];
+		  if (temp > maxim){
+			  maxim = temp;
+			  maxIndex = i;
+		  }
+		  hist[temp]++;
+	  }
+          int sum = 0;
+	  for (int ix = -1;ix<=1;ix++){
+		  for (int iy = -1;iy<=1;iy++){
+			sum += image_msg.data[maxIndex+ix+iy*image_msg.width];
+		  }
+	  }
+	  printf("HOHO %i %i %i\n",maxim,sum,lastExpose);
+	  if (auvControl && (picNumber++%5)==0)
+	  {
+		 if (maxim == 255) lastExpose = lastExpose/2; else  lastExpose = (lastExpose*240/maxim-lastExpose)+lastExpose;
+	  }
+	  WriteAndReadProperty(cam_set_->expose_us, lastExpose);
+	  // Release capture request
+  }
+  fi_->imageRequestUnlock(request_nr);
+  return true;
 }
 
 bool Bluefox2::GrabImage(sensor_msgs::Image &image_msg) {
@@ -149,7 +225,9 @@ void Bluefox2::Configure(Bluefox2DynConfig &config) {
   SetCts(config.cts);
   // Request
   FillCaptureQueue(config.request);
-
+  //automated exposure for UV LEDS
+  auvControl = config.auv;
+  if (auvControl) lastExpose = 1000;
   // Cache this config
   config_ = config;
 }
@@ -182,7 +260,8 @@ void Bluefox2::SetAgc(bool &auto_gain, double &gain_db) const {
 
 void Bluefox2::SetAec(bool &auto_expose, int &expose_us) const {
   WriteAndReadProperty(cam_set_->autoExposeControl, auto_expose);
-  if (!auto_expose) {
+  if (!auto_expose) { 
+    printf("Expose: %i",expose_us);
     WriteAndReadProperty(cam_set_->expose_us, expose_us);
   }
 }
